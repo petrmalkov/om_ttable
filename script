@@ -1,0 +1,114 @@
+#!/bin/bash
+
+channels_id=('UCkfli5Lk0q_hf7-XJFBiupw' \
+'UC5T-A7jMWgF_vVrdV5WeSaA' \
+'UCNlyfDKbGZ_wzzfN8rkOijQ' \
+'UCvrlE08Vr_qZb4cUUTRw77g' \
+'UCrI1sOpZWp5vsewI07AL7Ig' \
+'UCaHuYeDxdnXavTsdty0DrzQ' \
+'UCqpfTUv8XcXZCLzJT0bEkEg' \
+'UCG2kS4JQuHa3AilsLXlSbkQ' \
+'UCKqN0qk9yWuz7pNBfW-DHmw' \
+'UC3ZpW0npU881hrXKNYjYRDg' \
+'UC1FLNnu_jhPBgE6NbC6HhwQ' \
+'UCCtx8QXvXLzIBdcyNPP3mMg' \
+'UCqWIJf_sLpuYgMceTeGgQyg' \
+'UCeNWCATeWAza4-44YNCpBWw' \
+'UC3HWj1k-cD--dFNIMmDFG-g' \
+'UCKWEolJjpZEEtuI-1EiIaRg' \
+'UC5zHsEgKcTR0inQYpPOmBJw' \
+'UCVaeMynWSmukrIZB9_9M_uw' \
+'UC1XAbIlGFoXKEa8sLqqykkw' \
+'UCvi4qx8dk4fDJKT5LmFdlJQ' \
+'UC9GwrjOUGNU_cqlQpkcHxgQ' \
+'UCOZyjeBKIaZDTVtq7gwQbxQ' \
+'UCXGXx4nxd8PbghFa1174OEA' \
+"UCB6lwfW0Cj4WgnmqOJhLJag")
+
+language="$1"
+output_file="$2"
+today_flag="$3"
+
+prefix=$(dirname "$0")
+[[ "$(echo $prefix | cut -c1)" == "/" ]] || prefix="$(pwd)"
+source $prefix/$language.static
+source $prefix/$language.days || exit 2
+
+wipe_temp_dir() {
+    rm -rf $temp_dir
+}
+
+temp_dir=$(mktemp -d)
+cd $temp_dir || exit 2
+
+trap wipe_temp_dir EXIT
+
+sudo apt update -y
+sudo apt install git -y
+git clone https://github.com/soimort/translate-shell.git
+translator="$temp_dir/translate-shell/translate"
+
+> out
+
+if [[ -z "$today_flag" ]]; then
+    next_date=$(date --date="next day" +%d.%m)
+    next_dayofweek=$(date --date="next day" +%u)
+else
+    next_date=$(date +%d.%m)
+    next_dayofweek=$(date +%u)
+fi
+
+get_video() {
+wget $video_url$stream_id -O site
+start_time_stamp=$(grep -oP "\"scheduledStartTime\":\"[0-9]*\"" site | cut -d'"' -f4)
+start_date=$(date -d @$start_time_stamp +%d.%m)
+if [[ "$start_date" == "$next_date"  ]]; then
+    title=$(grep -oP "name=\"title\" content=\".*\"" site | cut -d'"' -f4)
+    start_time=$(date -d @$start_time_stamp +%H:%M)
+    if [[ "$($translator -brief -no-warn -no-auto "$title" -identify)" != "$language" ]]; then
+		t_title=$($translator -no-warn -no-auto -brief "$title" -t "$language")
+		echo "$start_time~$video_url$stream_id~$title~$t_title~$ch_name" >> out
+    else
+		echo "$start_time~$video_url$stream_id~$title~$ch_name" >> out
+    fi
+fi
+rm -f site
+}
+
+video_url="https://www.youtube.com/watch?v="
+for channel_id in "${channels_id[@]}"; do
+    wget https://www.youtube.com/channel/$channel_id -O ch_id
+    ch_name=$(grep -o "channelMetadataRenderer\":{\"title\":.*" ch_id | cut -d'"' -f5)
+    sed -i 's/webCommandMetadata/\n&/g' ch_id
+    ch_videos=$(grep "^webCommandMetadata" ch_id | grep "videos?" | head -n1 | cut -d'"' -f5 | cut -d"?" -f1)
+
+    for view_mode in $(echo -e "view=2&live_view=502\nview=0") #live upcoming and premiere
+    do
+	ch_url="https://www.youtube.com/$ch_videos?$view_mode"
+	wget $ch_url -O yt_site
+	sed -i 's/upcomingEventData/\n&/g' yt_site
+	while read line
+	do
+    	    stream_id=$(echo "$line" | grep "\"startTime\"\:\"[0-9]*\".*" | grep -o "\"videoId\"\:\".*\"" | head -n1 | cut -d'"' -f4)
+	    if [[ -z "$(echo "$list" | grep "\"$stream_id\"")" ]]; then
+		list="$list\"$stream_id\""
+    		get_video
+	    fi
+	done <<< "$(grep "^upcomingEventData" yt_site)"
+	rm -f yt_site
+    done
+    rm -f ch_id
+done
+
+day_str=day"$((next_dayofweek))"[@]
+for item in "${!day_str}"; do
+echo "$item" >> out
+done
+
+get_day_of_week
+echo -e "$next_date $str" > $output_file
+cat out | sort | \
+while read item; do
+    echo -e "$item" | tr "~" "\n" >> $output_file
+    echo "" >> $output_file
+done
