@@ -22,7 +22,9 @@ Get it to find more details (script does it automatically).
 *.days - days of week translated to specific language.  
 *.static - files with static time table for days (1-monday till 7-sunday), translated to specific language.  
 format of lines:  
-time~link~title~country or channel  
+    
+    time~link~title~country or channel  
+    
 any more fields with ~ separator (must to be for new line in output)  
 
 add these files for your language  
